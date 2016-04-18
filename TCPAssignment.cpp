@@ -34,6 +34,7 @@ TCPAssignment::~TCPAssignment()
 void TCPAssignment::initialize()
 {
 	socketList = std::vector<SocketData*>();
+	acceptQueue = std::vector<AcceptData*>();
 }
 
 void TCPAssignment::finalize()
@@ -103,7 +104,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 	struct TCPHeader header;
 	packet->readData(34, &header, sizeof(struct TCPHeader));
-	uint16_t TCP_control = header.off_control;	
+	uint16_t TCP_control = header.off_control;
 
 	if(!check_tcp_checksum(&header, src_ip_32, dest_ip_32))
 	{
@@ -138,16 +139,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		{
 			socketData->backlog -= 1;
 
-			//SocketData* childSocketData = new SocketData;
-			//memcpy(childSocketData, socketData, sizeof(SocketData));
-			//childSocketData->state = State::SYN_RECEIVED;
-			//childSocketData->pin_port = header.src_port;
-			//childSocketData->pin_addr.s_addr = *src_ip;
-			//socketList.push_back(childSocketData);
-			socketData->state = State::SYN_RECEIVED;
-			socketData->pin_family = socketData->sin_family;
-			socketData->pin_port = header.src_port;
-			socketData->pin_addr.s_addr = *src_ip;
+			SocketData* childSocketData = new SocketData;
+			memcpy(childSocketData, socketData, sizeof(SocketData));
+			childSocketData->state = State::SYN_RECEIVED;
+			childSocketData->pin_port = header.src_port;
+			childSocketData->pin_addr.s_addr = *src_ip;
+			socketList.push_back(childSocketData);
+			//socketData->state = State::SYN_RECEIVED;
+			//socketData->pin_family = socketData->sin_family;
+			//socketData->pin_port = header.src_port;
+			//socketData->pin_addr.s_addr = *src_ip;
 
 			struct TCPHeader newHeader;
 			memcpy(&newHeader, &header, sizeof(TCPHeader));
@@ -244,6 +245,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			return;
 		}
 		socketData->state = State::ESTABLISHED;
+
+		for (int i = 0; i < (int)acceptQueue.size(); i++)
+		{
+			if (acceptQueue[i]->sockfd == socketData->fd)
+			{
+				socketData->accepted = true;
+				returnSystemCall(acceptQueue[i]->acceptUUID, 0);
+				break;
+			}
+		}
 	}
 	else
 	{
@@ -323,36 +334,9 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 	bool found = false;
 	for (int i = 0; i < (int)socketList.size(); i++)
 	{
-		if (socketList[i]->fd == sockfd)
-		{
-			socketData = socketList[i];
-			found = true;
-			break;
-		}
-	}
-	if(!found || socketData->state != CLOSED) //TODO: do it when cannot find socketData in list
-	{
-		returnSystemCall(syscallUUID, -1);
-		return;
-	}
-	socketData->state = State::LISTEN;
-	socketData->backlog = backlog;
-	//socketData->backlog_queue = new Queue<struct Connection*>;
-	//socketData->handshake_queue = new Queue<struct SocketData*>;
-	returnSystemCall(syscallUUID, 0);
-	return;
-}
-
-void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
-	struct sockaddr *clientaddr, socklen_t *addrlen)
-{	
-	SocketData *socketData;
-	bool found = false;
-	for (int i = 0; i < (int)socketList.size(); i++)
-	{
 		socketData = socketList[i];
 		if (socketData->fd == sockfd
-			&& socketData->state == State::ESTABLISHED)
+			&& socketData->state == State::CLOSED)
 		{
 			found = true;
 			break;
@@ -363,13 +347,52 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
+	socketData->state = State::LISTEN;
+	socketData->backlog = backlog;
+
+	//TODO: if there is a accept waiting for connection, wake it up.
+
+	returnSystemCall(syscallUUID, 0);
+	return;
+}
+
+void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
+	struct sockaddr *clientaddr, socklen_t *addrlen)
+{	
+	SocketData *socketData;
+	bool found = false;
+
+	//find a socket with complete connection
+	for (int i = 0; i < (int)socketList.size(); i++)
+	{
+		socketData = socketList[i];
+		if (socketData->fd == sockfd
+			&& socketData->state == State::ESTABLISHED
+			&& socketData->accepted == false)
+		{
+			found = true;
+			break;
+		}
+	}
+	//if not found, block accept (store in queue)
+	if(!found)
+	{
+		AcceptData* acceptData = new AcceptData;
+		acceptData->sockfd = sockfd;
+		acceptData->acceptUUID = syscallUUID;
+		acceptQueue.push_back(acceptData);
+		return;
+	}
+	//if found, consume it and return immediately
+	//TODO: create a new file descriptor for incoming connection...?????
 	sockaddr_in *clientaddr_in = (sockaddr_in*)clientaddr;
 	clientaddr_in->sin_family = socketData->pin_family;
 	clientaddr_in->sin_port = socketData->pin_port;
 	clientaddr_in->sin_addr.s_addr = socketData->pin_addr.s_addr;
 	*addrlen = socketData->sin_addr_len;
+	socketData->accepted = true;
 	returnSystemCall(syscallUUID, 0);
-	return;		
+	return;
 }
 
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd,

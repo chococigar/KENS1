@@ -71,6 +71,12 @@ struct Connection
 	sockaddr_in *src;
 };
 
+struct AcceptData
+{
+	int sockfd;
+	UUID acceptUUID;
+};
+
 struct SocketData
 {
 	UUID socketUUID;
@@ -86,7 +92,9 @@ struct SocketData
 
 	State state;
 	int backlog;
-	std::vector<Connection> backlogList;
+	std::vector<Connection> pendingConnList;
+	bool accepted;
+
 };
 
 class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
@@ -126,6 +134,7 @@ protected:
 	bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
 
 	std::vector<SocketData*> socketList;
+	std::vector<AcceptData*> acceptQueue;
 	//----------------------------------------------------------------------------
 };
 

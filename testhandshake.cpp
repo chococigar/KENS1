@@ -42,10 +42,6 @@ protected:
 
 		addr.sin_family = AF_INET;
 		addr.sin_addr.s_addr = inet_addr(env["LISTEN_ADDR"].c_str());
-		printf("test s_addr = %d\n", addr.sin_addr.s_addr);
-		printf("test backlog = %d\n", atoi(env["BACKLOG"].c_str()));
-		printf("test acceptCount = %d\n", atoi(env["ACCEPT_COUNT"].c_str()));
-		printf("test expectAccept = %d\n", atoi(env["EXPECT_ACCEPT"].c_str()));
 		
 		addr.sin_port = htons(atoi(env["LISTEN_PORT"].c_str()));
 
