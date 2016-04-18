@@ -93,11 +93,23 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {
 	uint8_t src_ip[4];
 	uint8_t dest_ip[4];
+	uint32_t src_ip_32;
+	uint32_t dest_ip_32;
+
 	packet->readData(14+12, src_ip, 4);
 	packet->readData(14+16, dest_ip, 4);
+	memcpy(&src_ip_32, src_ip, 4);
+	memcpy(&dest_ip_32, dest_ip, 4);
+
 	struct TCPHeader header;
 	packet->readData(34, &header, sizeof(struct TCPHeader));
 	uint16_t TCP_control = header.off_control;	
+
+	if(!check_tcp_checksum(&header, src_ip_32, dest_ip_32))
+	{
+		freePacket(packet);
+		return;
+	}
 	
 	struct SocketData *socketData;
 	
@@ -146,9 +158,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			newHeader.off_control = header.off_control | 0x12; //syn + ack
 			newHeader.checksum = 0; //TODO: calculate checksum
+			add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
 
 			Packet *newPacket = allocatePacket(packet->getSize());
-			newPacket->writeData(0, &newHeader, sizeof(TCPHeader));
+			newPacket->writeData(14+12, dest_ip, 4);
+			newPacket->writeData(14+16, src_ip, 4);
+			newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
 
 			sendPacket("IPv4", newPacket);
 			freePacket(packet);
@@ -191,9 +206,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		newHeader.off_control = header.off_control | 0x10;
 		newHeader.off_control = header.off_control ^ 0x02; //ack only
 		newHeader.checksum = 0; //TODO: calculate checksum
+		add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
 
 		Packet *newPacket = allocatePacket(packet->getSize());
-		newPacket->writeData(0, &newHeader, sizeof(TCPHeader));
+		newPacket->writeData(14+12, dest_ip, 4);
+		newPacket->writeData(14+16, src_ip, 4);
+		newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
 
 		sendPacket("IPv4", newPacket);
 		freePacket(packet);
@@ -448,7 +466,7 @@ void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd,
 		return;
 	}
 	returnSystemCall(syscallUUID, 0);
-	/*
+	
 	//TODO: find socketData from list using sockfd
 	if(0) //TODO: do it when cannot find socketData in list
 	{
@@ -471,5 +489,21 @@ void TCPAssignment::timerCallback(void* payload)
 
 }
 
+void TCPAssignment::add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip)
+{
+	header->checksum = 0;
+	header->checksum = htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t*)header, sizeof(TCPHeader))));
+}
+
+bool TCPAssignment::check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip)
+{
+	uint16_t checksum = header->checksum;
+	struct TCPHeader newHeader;
+	memcpy(&newHeader, header, sizeof(TCPHeader));
+	newHeader.checksum = 0;
+	//if(checksum == htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t *)newHeader, sizeof(TCPHeader))))) return true;
+	//return false;
+	return checksum == htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t *)&newHeader, sizeof(TCPHeader))));
+}
 
 }
