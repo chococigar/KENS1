@@ -120,6 +120,10 @@ protected:
 		struct sockaddr *addr, socklen_t *addrlen);
 	virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd,
 		struct sockaddr *addr, socklen_t *addrlen);
+
+	void add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip);
+	bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
+
 	std::vector<SocketData*> socketList;
 	//----------------------------------------------------------------------------
 };
