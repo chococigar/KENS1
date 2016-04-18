@@ -80,6 +80,7 @@ struct SocketData
 	uint16_t sin_port;
 	struct in_addr sin_addr;
 	socklen_t sin_addr_len;
+	uint8_t pin_family;
 	uint16_t pin_port;
 	struct in_addr pin_addr;
 

@@ -91,10 +91,6 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {
-	//check header
-	//identify tcp control - determine if syn, synack, ack
-	//find matching socket: check ip, port, state
-	//
 	uint8_t src_ip[4];
 	uint8_t dest_ip[4];
 	packet->readData(14+12, src_ip, 4);
@@ -105,7 +101,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 	
 	struct SocketData *socketData;
 	
-	if (TCP_control & 0x02 && !TCP_control & 0x10) //syn
+	if (TCP_control & 0x02 && !TCP_control & 0x10) //server gets syn
 	{
 		bool found = false;
 		for (int i = 0; i < (int)socketList.size(); i++)
@@ -125,21 +121,23 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			return;
 		}
 		
-		SocketData* childSocketData = new SocketData;
-		memcpy(childSocketData, socketData, sizeof(SocketData));
-		childSocketData->state = State::SYN_RECEIVED;
-		childSocketData->pin_port = header.src_port;
-		childSocketData->pin_addr.s_addr = *src_ip;
-
-		socketList.push_back(childSocketData);
-		//TODO: save connection info
-
-		if(socketData->backlog > 0) // TODO: change
+		//TODO: save connection info??
+		if(socketData->backlog > 0)
 		{
 			socketData->backlog -= 1;
 
-			struct TCPHeader newHeader;
+			//SocketData* childSocketData = new SocketData;
+			//memcpy(childSocketData, socketData, sizeof(SocketData));
+			//childSocketData->state = State::SYN_RECEIVED;
+			//childSocketData->pin_port = header.src_port;
+			//childSocketData->pin_addr.s_addr = *src_ip;
+			//socketList.push_back(childSocketData);
+			socketData->state = State::SYN_RECEIVED;
+			socketData->pin_family = socketData->sin_family;
+			socketData->pin_port = header.src_port;
+			socketData->pin_addr.s_addr = *src_ip;
 
+			struct TCPHeader newHeader;
 			memcpy(&newHeader, &header, sizeof(TCPHeader));
 
 			//change source port and destination port
@@ -155,7 +153,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			sendPacket("IPv4", newPacket);
 			freePacket(packet);
 
-			childSocketData->state = SYN_RECEIVED;
 			return;
 		}
 		else //backlog full
@@ -205,7 +202,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		this->freePacket(packet);
 
 		socketData->state = ESTABLISHED;
-		//returnSystemCall(socketData->socketUUID, 0);
 		return;
 	}
 	else if (TCP_control & 0x10) //ack
@@ -229,7 +225,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			freePacket(packet);
 			return;
 		}
-		socketData->state == State::ESTABLISHED;
+		socketData->state = State::ESTABLISHED;
 	}
 	else
 	{
@@ -253,9 +249,6 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 	socketData->sin_family = 0;
 	socketData->sin_port = 0;
 	socketData->state = State::CLOSED;
-	//socketData->sin_addr = new in_addr;
-	//socketData->sin_addr = NULL;
-	//TODO: add socketData into list
 	socketList.push_back(socketData);
 	returnSystemCall(syscallUUID, fd);
 }
@@ -353,9 +346,9 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 		return;
 	}
 	sockaddr_in *clientaddr_in = (sockaddr_in*)clientaddr;
-	clientaddr_in->sin_family = socketData->sin_family;
-	clientaddr_in->sin_port = socketData->sin_port;
-	clientaddr_in->sin_addr.s_addr = socketData->sin_addr.s_addr;
+	clientaddr_in->sin_family = socketData->pin_family;
+	clientaddr_in->sin_port = socketData->pin_port;
+	clientaddr_in->sin_addr.s_addr = socketData->pin_addr.s_addr;
 	*addrlen = socketData->sin_addr_len;
 	returnSystemCall(syscallUUID, 0);
 	return;		
