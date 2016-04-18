@@ -73,8 +73,11 @@ struct Connection
 
 struct AcceptData
 {
+	UUID syscallUUID;
+	int pid;
 	int sockfd;
-	UUID acceptUUID;
+	sockaddr* clientaddr;
+	socklen_t* addrlen;
 };
 
 struct SocketData
