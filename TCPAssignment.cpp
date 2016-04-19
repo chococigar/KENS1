@@ -120,7 +120,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			socketData = socketList[i];
 			if((socketData->sin_addr.s_addr == *dest_ip || socketData->sin_addr.s_addr == INADDR_ANY)
 				&& socketData->sin_port == header.dst_port
-				&& socketData->state == State::LISTEN)
+				&& socketData->state == State::LISTEN
+				&& socketData->backlog > 0)
 			{
 				found = true;
 				break;
@@ -134,57 +135,53 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		}
 		printf("listening socket found!\n");
 		//TODO: save connection info??
-		if(socketData->backlog > 0)
-		{
-			socketData->backlog -= 1;
+		socketData->backlog -= 1;
 
-			SocketData* childSocketData = new SocketData;
-			memcpy(childSocketData, socketData, sizeof(SocketData));
-			childSocketData->state = State::SYN_RECEIVED;
-			childSocketData->pin_family = socketData->sin_family;
-			childSocketData->pin_port = header.src_port;
-			childSocketData->pin_addr.s_addr = *src_ip;
-			socketList.push_back(childSocketData);
-			//socketData->state = State::SYN_RECEIVED;
-			//socketData->pin_family = socketData->sin_family;
-			//socketData->pin_port = header.src_port;
-			//socketData->pin_addr.s_addr = *src_ip;
+		SocketData* childSocketData = new SocketData;
+		memcpy(childSocketData, socketData, sizeof(SocketData));
+		childSocketData->state = State::SYN_RECEIVED;
+		childSocketData->pin_family = socketData->sin_family;
+		childSocketData->pin_port = header.src_port;
+		childSocketData->pin_addr.s_addr = *src_ip;
+		socketList.push_back(childSocketData);
+		printf("child socket fd = %d\n", childSocketData->fd);
+		//socketData->state = State::SYN_RECEIVED;
+		//socketData->pin_family = socketData->sin_family;
+		//socketData->pin_port = header.src_port;
+		//socketData->pin_addr.s_addr = *src_ip;
 
-			struct TCPHeader newHeader;
-			memcpy(&newHeader, &header, sizeof(TCPHeader));
+		struct TCPHeader newHeader;
+		memcpy(&newHeader, &header, sizeof(TCPHeader));
 
-			//change source port and destination port
-			newHeader.src_port = header.dst_port;
-			newHeader.dst_port = header.src_port;
+		//change source port and destination port
+		newHeader.src_port = header.dst_port;
+		newHeader.dst_port = header.src_port;
 
-			newHeader.off_control = header.off_control | 0x12; //syn + ack
-			newHeader.checksum = 0; //TODO: calculate checksum
-			add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
+		newHeader.off_control = header.off_control | 0x12; //syn + ack
+		newHeader.checksum = 0; //TODO: calculate checksum
+		add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
 
-			Packet *newPacket = allocatePacket(packet->getSize());
-			newPacket->writeData(14+12, dest_ip, 4);
-			newPacket->writeData(14+16, src_ip, 4);
-			newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+		Packet *newPacket = allocatePacket(packet->getSize());
+		newPacket->writeData(14+12, dest_ip, 4);
+		newPacket->writeData(14+16, src_ip, 4);
+		newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
 
-			sendPacket("IPv4", newPacket);
-			freePacket(packet);
+		sendPacket("IPv4", newPacket);
+		freePacket(packet);
 
-			return;
-		}
-		else //backlog full
-		{
-			freePacket(packet);
-			return;
-		}
+		return;
 	}
 	else if (TCP_control & 0x02 && TCP_control & 0x10) //syn + ack
 	{
+		printf("received syn+ack!\n");
 		bool found = false;
 		for (int i = 0; i < (int)socketList.size(); i++)
 		{
 			socketData = socketList[i];
 			if((socketData->sin_addr.s_addr == *dest_ip || socketData->sin_addr.s_addr == INADDR_ANY)
 				&& socketData->sin_port == header.dst_port
+				&& socketData->pin_addr.s_addr == *src_ip
+				&& socketData->pin_port == header.src_port
 				&& socketData->state == State::SYN_SENT)
 			{
 				found = true;
@@ -193,9 +190,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		}
 		if(!found)
 		{
+			printf("SYN_SENT socket not found\n");
 			freePacket(packet);
 			return;
 		}
+		printf("SYN_SENT socket found\n");
+
 		struct TCPHeader newHeader;
 
 		memcpy(&newHeader, &header, sizeof(TCPHeader));
@@ -213,9 +213,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		newPacket->writeData(14+12, dest_ip, 4);
 		newPacket->writeData(14+16, src_ip, 4);
 		newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
-
-		sendPacket("IPv4", newPacket);
-		freePacket(packet);
 
 		this->sendPacket("IPv4", newPacket);
 		this->freePacket(packet);
@@ -278,6 +275,7 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
+	printf("socket(): fd = %d\n", fd);
 	SocketData* socketData = new SocketData;
 	socketData->socketUUID = syscallUUID;
 	socketData->fd = fd;
@@ -326,12 +324,55 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *serv_addr, socklen_t addrlen)
 {
 	//TODO: find socketData from list using sockfd
-	if(0) //TODO: do it when cannot find socketData in list
+	printf("connect() is called\n");
+	
+	struct SocketData *socketData;
+	bool found = false;
+	for (int i = 0; i < (int)socketList.size(); i++)
 	{
+		socketData = socketList[i];
+		if (socketData->fd == sockfd
+			&& socketData->state == State::CLOSED)
+		{
+			found = true;
+			break;
+		}
+	}
+	if(!found)
+	{
+		printf("connect() has not found socket\n");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
+	printf("connect() has found socket\n");
+	sockaddr_in *serv_addr_in = (sockaddr_in*)serv_addr;
+	socketData->pin_family = socketData->sin_family;
+	socketData->pin_port = serv_addr_in->sin_port;
+	socketData->pin_addr.s_addr = serv_addr_in->sin_addr.s_addr;
+	socketData->state = State::SYN_SENT;
 
+	struct TCPHeader newHeader;
+
+	//change source port and destination port
+	
+	newHeader.src_port = socketData->sin_port;
+	newHeader.dst_port = socketData->pin_port;
+
+	newHeader.off_control = (uint16_t)0x0002;
+	//newHeader.off_control = header.off_control | 0x10;
+	//newHeader.off_control = header.off_control ^ 0x02; //ack only
+	newHeader.checksum = 0; //TODO: calculate checksum
+	add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
+
+	Packet *newPacket = allocatePacket(sizeof(Packet));
+	newPacket->writeData(14+12, &(socketData->sin_addr.s_addr), 4);
+	newPacket->writeData(14+16, &(socketData->pin_addr.s_addr), 4);
+	newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+
+	this->sendPacket("IPv4", newPacket);
+
+	returnSystemCall(syscallUUID, 0);
+		return;
 }
 
 void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog)
@@ -356,8 +397,6 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 	}
 	socketData->state = State::LISTEN;
 	socketData->backlog = backlog;
-
-	//TODO: if there is a accept waiting for connection, wake it up.
 
 	returnSystemCall(syscallUUID, 0);
 	return;
@@ -397,6 +436,18 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 	}
 	printf("accept is done immediately\n");
 	//if found, consume it and return immediately
+	printf("before reassign fd: %d\n", socketData->fd);
+	
+	int fd;
+	if((fd = createFileDescriptor(pid)) == -1)
+	{
+		returnSystemCall(syscallUUID, -1);
+		return;
+	}
+	printf("reassign fd: %d\n", fd);
+	socketData->fd = fd;
+	socketData->accepted = true;
+
 	sockaddr_in *clientaddr_in = (sockaddr_in*)clientaddr;
 	clientaddr_in->sin_family = socketData->pin_family;
 	clientaddr_in->sin_port = socketData->pin_port;
@@ -404,15 +455,8 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 	*addrlen = socketData->sin_addr_len;
 
 	//TODO: create a new file descriptor for incoming connection...?????
-	socketData->accepted = true;
-	int fd;
-	if((fd = createFileDescriptor(pid)) == -1)
-	{
-		returnSystemCall(syscallUUID, -1);
-		return;
-	}
-	socketData->fd = fd;
-	returnSystemCall(syscallUUID, 0);
+
+	returnSystemCall(syscallUUID, fd);
 	return;
 }
 
