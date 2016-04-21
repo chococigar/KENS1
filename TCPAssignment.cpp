@@ -250,7 +250,20 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		{
 			if (acceptQueue[i]->sockfd == socketData->fd)
 			{
+				int fd;
+				if((fd = createFileDescriptor(socketData->pid)) == -1)
+				{
+					printf("failed to reassign new fd\n");
+				}
+				socketData->fd = fd;
 				socketData->accepted = true;
+
+				sockaddr_in *clientaddr_in = (sockaddr_in*)acceptQueue[i]->clientaddr;
+				socketData->pin_family = clientaddr_in->sin_family;
+				socketData->pin_port = clientaddr_in->sin_port;
+				socketData->pin_addr.s_addr = clientaddr_in->sin_addr.s_addr;
+				socketData->sin_addr_len = *acceptQueue[i]->addrlen;
+
 				returnSystemCall(acceptQueue[i]->syscallUUID, 0);
 				free(acceptQueue[i]);
 				acceptQueue.erase(acceptQueue.begin()+i);
@@ -324,7 +337,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *serv_addr, socklen_t addrlen)
 {
 	//TODO: find socketData from list using sockfd
-	printf("connect() is called\n");
+	printf("connect() : ");
 	
 	struct SocketData *socketData;
 	bool found = false;
@@ -340,11 +353,11 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd,
 	}
 	if(!found)
 	{
-		printf("connect() has not found socket\n");
+		printf("socket not found\n");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
-	printf("connect() has found socket\n");
+	printf("socket found\n");
 	sockaddr_in *serv_addr_in = (sockaddr_in*)serv_addr;
 	socketData->pin_family = socketData->sin_family;
 	socketData->pin_port = serv_addr_in->sin_port;
@@ -405,7 +418,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *clientaddr, socklen_t *addrlen)
 {	
-	printf("accept is called\n");
+	printf("accept() : ");
 	SocketData *socketData;
 	bool found = false;
 
@@ -424,7 +437,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 	//if not found, block accept (store in queue)
 	if(!found)
 	{
-		printf("accept is blocked\n");
+		printf("blocked\n");
 		AcceptData* acceptData = new AcceptData;
 		acceptData->syscallUUID = syscallUUID;
 		acceptData->pid = pid;
@@ -434,7 +447,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 		acceptQueue.push_back(acceptData);
 		return;
 	}
-	printf("accept is done immediately\n");
+	printf("not blocked\n");
 	//if found, consume it and return immediately
 	printf("before reassign fd: %d\n", socketData->fd);
 	
