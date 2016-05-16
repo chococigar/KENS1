@@ -139,12 +139,12 @@ protected:
 
 			addr.sin_family = AF_INET;
 			addr.sin_addr.s_addr = inet_addr(env["CONNECT_ADDR"].c_str());
-			addr.sin_port = htons(atoi(env["CONNECT_PORT"].c_str()));printf("client makes socket\n");
+			addr.sin_port = htons(atoi(env["CONNECT_PORT"].c_str()));
 
-			int ret = connect(client_socket, (struct sockaddr*)&addr, len); printf("ret = %d\n", ret);
+			int ret = connect(client_socket, (struct sockaddr*)&addr, len);
 			if(ret == 0)
 			{
-				struct sockaddr_in temp_addr; printf("client connect returns 0\n");
+				struct sockaddr_in temp_addr;
 				socklen_t temp_len = sizeof(temp_addr);
 				int ret = getpeername(client_socket, (struct sockaddr*)&temp_addr, &temp_len);
 				EXPECT_EQ(ret, 0);
@@ -162,7 +162,6 @@ protected:
 				client_sockets.push_back(client_socket);
 				client_ports.push_back(temp_addr.sin_port);
 			}
-
 			usleep(connect_period);
 		}
 

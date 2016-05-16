@@ -66,9 +66,11 @@ enum State //to implement TCP 3-way handshaking
 
 struct Connection
 {
-	uint32_t seq;
-	uint32_t ack;
-	sockaddr_in *src;
+	//uint32_t seq;
+	//uint32_t ack;
+	//sockaddr_in *src;
+	uint16_t		pin_port;
+	struct in_addr	pin_addr;
 };
 
 struct AcceptData
@@ -85,17 +87,21 @@ struct SocketData
 	UUID socketUUID;
 	int fd;
 	int pid;
-	uint8_t sin_family;
-	uint16_t sin_port;
-	struct in_addr sin_addr;
+
+	uint8_t			sin_family;
+	uint16_t		sin_port;
+	struct in_addr	sin_addr;
+
 	socklen_t sin_addr_len;
+	
 	uint8_t pin_family;
 	uint16_t pin_port;
 	struct in_addr pin_addr;
 
 	State state;
 	int backlog;
-	std::vector<Connection> pendingConnList;
+	int pendingConnections;
+	//std::vector<Connection> pendingConnections;
 	bool accepted;
 
 };
