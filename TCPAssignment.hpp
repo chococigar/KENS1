@@ -141,7 +141,7 @@ protected:
 
 	void add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip);
 	bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
-
+	void print_socket(SocketData*);
 	std::vector<SocketData*> socketList;
 	std::vector<AcceptData*> acceptQueue;
 	//----------------------------------------------------------------------------
