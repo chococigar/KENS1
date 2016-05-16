@@ -105,7 +105,7 @@ void printPacketContent(Packet* packet)
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {
-	std::cout << "packetArrived() : ";
+	//std::cout << "packetArrived() : ";
 
 	//printPacketContent(packet);
 	
@@ -129,11 +129,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		freePacket(packet);
 		return;
 	}
+	//printf("port = %04x, ip = %08x\n", header.dst_port, src_ip_32);
 
 	struct SocketData *socketData;
 	if ((TCP_control & 0x02) && !(TCP_control & 0x10)) //server gets syn
 	{
-		printf("syn!\n");
+		//printf("syn!\n");
 		//find socket with matching dest ip, port, in listening state, and with pendingconnections less than backlog
 		bool found = false;
 		for (int i = 0; i < (int)socketList.size(); i++)
@@ -150,16 +151,18 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		}
 		if (!found)
 		{
+			//printf("syn target socket not found\n");
 			freePacket(packet);
 			return;
 		}
-		
+		printf("syn recv: start handshake\n");
 		socketData->pendingConnections += 1;
 
 		//make child socket
 		SocketData* childSocketData = new SocketData;
 		memcpy(childSocketData, socketData, sizeof(SocketData));
 		childSocketData->state = State::SYN_RECEIVED;
+		printf("family = %d\n", socketData->sin_family);
 		childSocketData->pin_family = socketData->sin_family;
 		childSocketData->pin_port = header.src_port;
 		childSocketData->pin_addr.s_addr = *src_ip;
@@ -314,20 +317,17 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					acceptQueue[i]->clientaddr,
 					acceptQueue[i]->addrlen);
 					*/
+
 				//assign new file desriptor
-				int fd;
-				if((fd = createFileDescriptor(socketData->pid)) == -1)
-				{
-					printf("failed to reassign new fd\n");
-				}
+				int fd = createFileDescriptor(socketData->pid);
 				socketData->fd = fd;
 				socketData->accepted = true;
 
 				sockaddr_in *clientaddr_in = (sockaddr_in*)acceptQueue[i]->clientaddr;
-				socketData->pin_family = clientaddr_in->sin_family;
-				socketData->pin_port = clientaddr_in->sin_port;
-				socketData->pin_addr.s_addr = clientaddr_in->sin_addr.s_addr;
-				socketData->sin_addr_len = *acceptQueue[i]->addrlen;
+				clientaddr_in->sin_family = socketData->pin_family;
+				clientaddr_in->sin_port = socketData->pin_port;
+				clientaddr_in->sin_addr.s_addr = socketData->pin_addr.s_addr;
+				*acceptQueue[i]->addrlen = socketData->sin_addr_len;
 
 				returnSystemCall(acceptQueue[i]->syscallUUID, fd);
 				free(acceptQueue[i]);
@@ -352,7 +352,7 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
-	//printf("socket(): fd = %d\n", fd);
+	printf("socket(): fd = %d\n", fd);
 	SocketData* socketData = new SocketData;
 	socketData->socketUUID = syscallUUID;
 	socketData->fd = fd;
@@ -402,7 +402,7 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void* b
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, 
 	struct sockaddr *serv_addr, socklen_t addrlen)
 {
-	
+	/*
 	//TODO: find socketData from list using sockfd
 	printf("pid:%d, connect() : ", pid);
 
@@ -465,7 +465,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd,
 	//returnSystemCall(syscallUUID, 0);
 	return;
 	
-	
+	*/
 	
 }
 
@@ -486,14 +486,12 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 	}
 	if(!found)
 	{
+		printf("listen: socket not found");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
 	socketData->state = State::LISTEN;
 	socketData->backlog = backlog;
-	//TODO: save pending connection for each server socket
-	//		count pending connections not to exceed the backlog value
-	//TODO: if there is accept waiting for connection, wake it up.
 	printf("listen(), sockfd = %d \n", sockfd);
 	returnSystemCall(syscallUUID, 0);
 	return;
@@ -565,25 +563,27 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd,
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *addr, socklen_t addrlen)
 {
-	//TODO: find socketData from list using sockfd
 	bool found = false;
 	//TODO: check if port is already being used by another socket in the list.
 	//however differet IP can use same port number.
 	struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-	auto port = addr_in->sin_port;	
+
+	printf("port = %04x, ip = %08x\n", addr_in->sin_port, addr_in->sin_addr.s_addr);
+
 	for (int i = 0; i < (int)socketList.size(); i++)
 	{
-		if(socketList[i]->sin_port == port 
+		if(socketList[i]->sin_port == addr_in->sin_port 
 			&& (socketList[i]->sin_addr.s_addr == addr_in->sin_addr.s_addr 
 				|| socketList[i]->sin_addr.s_addr == INADDR_ANY))
 		{
+			printf("bind: socket with specified ip/port already exists.\n");
 			returnSystemCall(syscallUUID, -1);
 			return;
 		}
 	}
 	for (int i = 0; i < (int)socketList.size(); i++)
 	{
-		if (socketList[i]->fd == sockfd && socketList[i]->sin_family == 0)
+		if (socketList[i]->fd == sockfd)
 		{
 			socketList[i]->sin_family = addr_in->sin_family;
 			socketList[i]->sin_port = addr_in->sin_port;
@@ -593,8 +593,9 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd,
 			found = true;
 		}
 	}
-	if(!found) //TODO: do it when cannot find socketData in list
+	if(!found)
 	{
+		printf("bind: can't find socket\n");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
@@ -605,7 +606,6 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd,
 void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *addr, socklen_t *addrlen)
 {
-	//TODO: find socketData from list using sockfd
 	struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
 	bool found = false;
 	for (int i = 0; i < (int)socketList.size(); i++)
@@ -614,6 +614,7 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd,
 		{
 			//TODO: initialize with findiing socketData
 			addr_in->sin_family = socketList[i]->sin_family;
+			printf("sin_family = %d\n", addr_in->sin_family);
 			addr_in->sin_port = socketList[i]->sin_port;
 			addr_in->sin_addr = socketList[i]->sin_addr;
 			*addrlen = socketList[i]->sin_addr_len;
@@ -621,7 +622,7 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd,
 			break;
 		}
 	}
-	if(!found) //TODO: do it when cannot find socketData in list
+	if(!found)
 	{
 		returnSystemCall(syscallUUID, -1);
 		return;
@@ -633,44 +634,27 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd,
 void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd,
 	struct sockaddr *addr, socklen_t *addrlen)
 {
-	/*
-	//TODO: find socketData from list using sockfd
+	struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
 	bool found = false;
-	for (int i = 0; i < socketList.size(); i++)
+	for (int i = 0; i < (int)socketList.size(); i++)
 	{
-		if (socketList[i]->fd == sockfd && socketList[i]->sin_family == -1)
+		if (socketList[i]->fd == sockfd)// && socketList[i]->sin_family == -1)
 		{
-			//TODO: initialize with findiing socketData
-			struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-			addr_in->sin_family = socketList[i]->sin_family;
-			addr_in->sin_port = socketList[i]->sin_port;
-			addr_in->sin_addr = socketList[i]->sin_addr;
+			addr_in->sin_family = socketList[i]->pin_family;
+			printf("pin_family = %d\n", addr_in->sin_family);
+			addr_in->sin_port = socketList[i]->pin_port;
+			addr_in->sin_addr = socketList[i]->pin_addr;
+			*addrlen = socketList[i]->sin_addr_len;
 			found = true;
 			break;
 		}
 	}
-	if(!found) //TODO: do it when cannot find socketData in list
+	if(!found)
 	{
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
 	returnSystemCall(syscallUUID, 0);
-	
-	//TODO: find socketData from list using sockfd
-	if(0) //TODO: do it when cannot find socketData in list
-	{
-		returnSystemCall(syscallUUID, -1);
-		return;
-	}
-	SocketData *socketData; //TODO: initialize with findiing socketData
-	struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-	addr_in->sin_family = socketData->sin_family;
-	addr_in->sin_port = socketData->sin_port;
-	addr_in->sin_addr = socketData->sin_addr;
-	returnSystemCall(syscallUUID, 0);
-	*/
-	returnSystemCall(syscallUUID, -1);
-
 }
 
 void TCPAssignment::timerCallback(void* payload)
