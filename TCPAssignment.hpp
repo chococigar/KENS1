@@ -58,14 +58,18 @@ struct TCPHeader {
 
 enum State //to implement TCP 3-way handshaking
 { 
-	SYN_SENT, //client - send SYN packet
 	CLOSED, //server - port closed
 	LISTEN, //server - port servicing
-	SYN_RECEIVED, //server - get SYN and send SYN+ACK
+	SYN_RCVD, //server - get SYN and send SYN+ACK
+	SYN_SENT, //client - send SYN packet
+	SYN_RCVD_CLIENT, //client before estab
+	ACK_RCVD_CLIENT, //client before estab
 	ESTABLISHED, //client - get SYN+ACK or server - get ACK
-	//see http://mintnlatte.tistory.com/552
-	SYN_RCVD_CLIENT,
-	ACK_RCVD_CLIENT
+	CLOSE_WAIT,
+	LAST_ACK,
+	FIN_WAIT_1,
+	FIN_WAIT_2,
+	TIMED_WAIT
 };
 
 struct Connection
@@ -151,6 +155,7 @@ protected:
 	void add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip);
 	bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
 	void print_socket(SocketData*);
+	void reply_ack(Packet* packet);
 	std::vector<SocketData*> socketList;
 	std::vector<AcceptData*> acceptQueue;
 	Host* host;
