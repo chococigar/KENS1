@@ -62,6 +62,8 @@ enum State //to implement TCP 3-way handshaking
 	SYN_RECEIVED, //server - get SYN and send SYN+ACK
 	ESTABLISHED, //client - get SYN+ACK or server - get ACK
 	//see http://mintnlatte.tistory.com/552
+	SYN_RCVD_CLIENT,
+	ACK_RCVD_CLIENT
 };
 
 struct Connection
@@ -144,6 +146,7 @@ protected:
 	void print_socket(SocketData*);
 	std::vector<SocketData*> socketList;
 	std::vector<AcceptData*> acceptQueue;
+	Host* host;
 	//----------------------------------------------------------------------------
 };
 
