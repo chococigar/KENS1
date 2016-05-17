@@ -777,14 +777,6 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 		if (socketData->fd == sockfd &&
 			socketData->pid == pid)
 		{
-<<<<<<< HEAD
-			free(socketList[i]->write_buffer);
-			free(socketList[i]->read_buffer);
-			delete socketList[i];
-			socketList.erase(socketList.begin()+i);
-			found = true;
-			break;
-=======
 			if (socketData->state == State::ESTABLISHED)
 			{
 				socketData->state = State::FIN_WAIT_1;
@@ -811,13 +803,14 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 			}
 			if (socketData->state == State::CLOSED)
 			{
+				free(socketList[i]->write_buffer);
+				free(socketList[i]->read_buffer);
 				delete socketList[i];
 				socketList.erase(socketList.begin()+i);
 				removeFileDescriptor(pid, sockfd);
 				returnSystemCall(syscallUUID, 0);
 				return;
 			}
->>>>>>> 07da96507c2860adef1763aaff6ddc561a34b8f8
 		}
 	}
 	returnSystemCall(syscallUUID, -1);
@@ -858,7 +851,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* bu
 
 	else
 	{
-		if(buffer_size <= len)
+		if(buffer_pointer <= len)
 		{
 			memcpy(buffer, socketData->read_buffer, buffer_pointer);
 			socketData->read_buffer_pointer = 0;
@@ -867,7 +860,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* bu
 		{
 			memcpy(buffer, socketData->read_buffer, len);
 			memmove(socketData->read_buffer, socketData->read_buffer + len, socketData->read_buffer_pointer - len);
-			socketData->read_buffer->pointer -= len;
+			socketData->read_buffer_pointer -= len;
 		}
 		memcpy(socketData->write_buffer + buffer_pointer, buffer, len);
 	}
