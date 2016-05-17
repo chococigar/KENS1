@@ -19,6 +19,8 @@
 
 #include <E/E_TimerModule.hpp>
 
+#define WRITE_BUFFER_SIZE 1024
+#define READ_BUFFER_SIZE 1024
 namespace E
 {
 
@@ -110,6 +112,11 @@ struct SocketData
 	//std::vector<Connection> pendingConnections;
 	bool accepted;
 
+
+	char* write_buffer;
+	int write_buffer_pointer;
+	char* read_buffer;
+	int read_buffer_pointer;
 };
 
 class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
