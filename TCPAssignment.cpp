@@ -462,6 +462,10 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 	socketData->backlog = 0;
 	socketData->pendingConnections = 0;
 	socketData->accepted = false;
+	socketData->write_buffer = (char*)malloc(WRITE_BUFFER_SIZE);
+	socketData->write_buffer_pointer = 0;
+	socketData->read_buffer = (char*)malloc(READ_BUFFER_SIZE);
+	socketData->read_buffer_pointer = 0;
 	socketList.push_back(socketData);
 	//print_socket(socketData);
 
@@ -478,6 +482,8 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 		if (socketList[i]->fd == sockfd &&
 			socketList[i]->pid == pid)
 		{
+			free(socketList[i]->write_buffer);
+			free(socketList[i]->read_buffer);
 			delete socketList[i];
 			socketList.erase(socketList.begin()+i);
 			found = true;
@@ -496,14 +502,97 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 
 void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* buffer, size_t len)
 {
-	//syscall_read - don't have to implement now.
+	SocketData *socketData;
+	bool found = false;
+
+	//find a socket of sockfd, with complete connection
+	for (int i = 0; i < (int)socketList.size(); i++)
+	{
+		socketData = socketList[i];
+		if (socketData->fd == sockfd &&
+			socketData->pid == pid)
+		{
+			found = true;
+			break;
+		}
+	}
+	//if not found, block accept (store in queue)
+	if(!found)
+	{
+		printf("syscall_read - cannot find socket!\n");
+		returnSystemCall(syscallUUID, -1);
+		return;
+	}
+
+	int buffer_pointer = socketData->read_buffer_pointer;
+
+	if(len < 0 || len > READ_BUFFER_SIZE) 
+	{
+		returnSystemCall(syscallUUID, -1);
+		return;
+	}
+
+	else
+	{
+		if(buffer_size <= len)
+		{
+			memcpy(buffer, socketData->read_buffer, buffer_pointer);
+			socketData->read_buffer_pointer = 0;
+		}
+		else
+		{
+			memcpy(buffer, socketData->read_buffer, len);
+			memmove(socketData->read_buffer, socketData->read_buffer + len, socketData->read_buffer_pointer - len);
+			socketData->read_buffer->pointer -= len;
+		}
+		memcpy(socketData->write_buffer + buffer_pointer, buffer, len);
+	}
+
 	returnSystemCall(syscallUUID, 0);
+	return;
 }
 
 void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void* buffer, size_t len)
 {
-	//syscall_write - don't have to implement now.
+	SocketData *socketData;
+	bool found = false;
+
+	//find a socket of sockfd, with complete connection
+	for (int i = 0; i < (int)socketList.size(); i++)
+	{
+		socketData = socketList[i];
+		if (socketData->fd == sockfd &&
+			socketData->pid == pid)
+		{
+			found = true;
+			break;
+		}
+	}
+	//if not found, block accept (store in queue)
+	if(!found)
+	{
+		printf("syscall_write - cannot find socket!\n");
+		returnSystemCall(syscallUUID, -1);
+		return;
+	}
+
+	int buffer_pointer = socketData->write_buffer_pointer;
+
+	//if(len < 0 || len > WRITE_BUFFER_SIZE) returnSystemCall(syscallUUID, 0);
+	if(len < 0 || len + buffer_pointer > WRITE_BUFFER_SIZE) 
+	{
+		returnSystemCall(syscallUUID, -1);
+		return;
+	}
+
+	else
+	{
+		memcpy(socketData->write_buffer + buffer_pointer, buffer, len);
+		socketData->write_buffer_pointer += len;
+	}
+
 	returnSystemCall(syscallUUID, 0);
+	return;
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, 
