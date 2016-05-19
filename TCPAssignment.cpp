@@ -140,18 +140,20 @@ void TCPAssignment::reply_ack(Packet* packet)
 	newHeader.sequence_num = htonl(ntohl(header.sequence_num) + 1);
 	newHeader.ack_num = newHeader.sequence_num;
 	newHeader.checksum = 0;
-	add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
+	//add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32, (int)packet->getSize() - 54;
 
 	Packet *newPacket = clonePacket(packet);
 	newPacket->writeData(14+12, dest_ip, 4);
 	newPacket->writeData(14+16, src_ip, 4);
 	newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+	add_tcp_checksum(newPacket);
+
 	sendPacket("IPv4", newPacket);
 }
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {
-	//std::cout << "packetArrived() : ";
+	std::cout << "packetArrived() : ";
 
 	//printPacketContent(packet);
 	
@@ -169,7 +171,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 	packet->readData(34, &header, sizeof(struct TCPHeader));
 	uint16_t TCP_control = ntohs(header.off_control);
 	
-	if(!check_tcp_checksum(&header, src_ip_32, dest_ip_32))
+	//if(!check_tcp_checksum(&header, src_ip_32, dest_ip_32))
+	if(!check_tcp_checksum(packet))
 	{
 		printf("checksum failed\n");
 		freePacket(packet);
@@ -206,6 +209,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		freePacket(packet);
 		return;
 	}
+	if(TCP_control & 0x10)
+	{
+		printf("just got ack\n");
+	}
 	//printPacketContent(packet);
 	switch (socketData->state)
 	{
@@ -230,6 +237,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			childSocketData->pin_family = socketData->sin_family;
 			childSocketData->pin_port = header.src_port;
 			childSocketData->pin_addr.s_addr = src_ip_32;
+			childSocketData->segmentList = std::vector<SegmentInfo>();
 			socketList.push_back(childSocketData);
 
 			//send syn+ack packet
@@ -241,7 +249,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			newHeader.sequence_num = htonl(ntohl(header.sequence_num) + 1);
 			newHeader.ack_num = newHeader.sequence_num;
 			newHeader.checksum = 0;
-			add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
+			//add_tcp_checksum(&newHeader, dest_ip_32, src_ip_32);
+			add_tcp_checksum(packet);
 
 			Packet *newPacket = clonePacket(packet);
 			newPacket->writeData(14+12, dest_ip, 4);
@@ -300,6 +309,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			if (TCP_control & 0x10) //ack
 			{
 				socketData->state = ACK_RCVD_CLIENT;
+				socketData->sequence = ntohl(header.sequence_num);
 			}
 			//case syn
 			if (TCP_control & 0x02) //syn
@@ -323,6 +333,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			if (TCP_control & 0x10) //ack
 			{
 				socketData->state = ESTABLISHED;
+				socketData->sequence = ntohl(header.sequence_num);
 				returnSystemCall(socketData->socketUUID, 0);
 			}
 			break;
@@ -342,6 +353,19 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				reply_ack(packet);
 				socketData->state = CLOSE_WAIT;
 			}
+			else if (TCP_control & 0x0010) // ack
+			{
+				printf("seq = %d, ack = %d\n", header.sequence_num, header.ack_num);
+				printPacketContent(packet);
+				socketData->sequence = ntohl(header.sequence_num);
+				//TODO: buffer management
+			}
+			else //data
+			{
+				//TODO: read data
+				reply_ack(packet);
+			}
+
 			break;
 		}
 		case State::FIN_WAIT_1:
@@ -408,6 +432,7 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 	socketData->write_buffer_pointer = 0;
 	socketData->read_buffer = (char*)malloc(READ_BUFFER_SIZE);
 	socketData->read_buffer_pointer = 0;
+	//socketData->segmentList = NULL;
 	socketList.push_back(socketData);
 	//print_socket(socketData);
 
@@ -416,7 +441,7 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 {
-	//printf("(pid:%d) close(%d)\n", pid, sockfd);
+	printf("(pid:%d) close(%d)\n", pid, sockfd);
 	//TODO: find socketData from list using sockfd
 	SocketData *socketData;
 	for (int i = 0; i < (int)socketList.size(); i++)
@@ -438,12 +463,13 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 				newHeader.ack_num = 0;
 				newHeader.off_control = htons(0x5001);
 				newHeader.checksum = 0;
-				add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
-
+				//add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
+				
 				Packet *newPacket = allocatePacket(54);
 				newPacket->writeData(14+12, &(socketData->sin_addr.s_addr), 4);
 				newPacket->writeData(14+16, &(socketData->pin_addr.s_addr), 4);
 				newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+				add_tcp_checksum(newPacket);
 
 				//printPacketContent(newPacket);
 				this->sendPacket("IPv4", newPacket);
@@ -467,6 +493,7 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int sockfd)
 
 void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* buffer, size_t len)
 {
+	printf("(pid:%d) read(%d) \n", pid, sockfd);
 	SocketData *socketData;
 	bool found = false;
 
@@ -481,7 +508,6 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* bu
 			break;
 		}
 	}
-	//if not found, block accept (store in queue)
 	if(!found)
 	{
 		printf("syscall_read - cannot find socket!\n");
@@ -499,7 +525,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* bu
 
 	else
 	{
-		if(buffer_pointer <= len)
+		if(buffer_pointer <= (int)len)
 		{
 			memcpy(buffer, socketData->read_buffer, buffer_pointer);
 			socketData->read_buffer_pointer = 0;
@@ -519,6 +545,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void* bu
 
 void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void* buffer, size_t len)
 {
+	printf("(pid:%d): write(%d, %d)\n", pid, sockfd, (int)len);
 	SocketData *socketData;
 	bool found = false;
 
@@ -533,30 +560,51 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void* b
 			break;
 		}
 	}
-	//if not found, block accept (store in queue)
 	if(!found)
 	{
 		printf("syscall_write - cannot find socket!\n");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
+	print_socket(socketData);
 
 	int buffer_pointer = socketData->write_buffer_pointer;
 
 	//if(len < 0 || len > WRITE_BUFFER_SIZE) returnSystemCall(syscallUUID, 0);
 	if(len < 0 || len + buffer_pointer > WRITE_BUFFER_SIZE) 
 	{
+		printf("buffersize over\n");
 		returnSystemCall(syscallUUID, -1);
 		return;
 	}
-
 	else
 	{
 		memcpy(socketData->write_buffer + buffer_pointer, buffer, len);
-		socketData->write_buffer_pointer += len;
+		socketData->write_buffer_pointer += len;	
 	}
+	//TODO: send packet with data attached.
+	struct TCPHeader newHeader;
+	newHeader.src_port = socketData->sin_port;
+	newHeader.dst_port = socketData->pin_port;
+	newHeader.sequence_num = socketData->sequence;
+	newHeader.ack_num = 0;
+	newHeader.off_control = htons(0x5000);
+	newHeader.checksum = 0;
+	//add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
 
-	returnSystemCall(syscallUUID, 0);
+
+	Packet *newPacket = allocatePacket(54 + len);
+	newPacket->writeData(14+12, &(socketData->sin_addr.s_addr), 4);
+	newPacket->writeData(14+16, &(socketData->pin_addr.s_addr), 4);
+	newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+	newPacket->writeData(54, socketData->write_buffer, len);
+
+	add_tcp_checksum(newPacket);
+
+	//printPacketContent(newPacket);
+	this->sendPacket("IPv4", newPacket);
+
+	returnSystemCall(syscallUUID, len);
 	return;
 }
 
@@ -611,11 +659,12 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd,
 	newHeader.ack_num = 0;
 	newHeader.off_control = htons(0x5002);
 	newHeader.checksum = 0;
-	add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
+	//add_tcp_checksum(&newHeader, socketData->pin_addr.s_addr, socketData->sin_addr.s_addr);
 	Packet *newPacket = allocatePacket(54);
 	newPacket->writeData(14+12, &(socketData->sin_addr.s_addr), 4);
 	newPacket->writeData(14+16, &(socketData->pin_addr.s_addr), 4);
 	newPacket->writeData(34, &newHeader, sizeof(TCPHeader));
+	add_tcp_checksum(newPacket);
 	//printPacketContent(newPacket);
 	this->sendPacket("IPv4", newPacket);
 
@@ -825,21 +874,50 @@ void TCPAssignment::timerCallback(void* payload)
 
 }
 
-void TCPAssignment::add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip)
+//void TCPAssignment::add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip)
+void TCPAssignment::add_tcp_checksum(Packet* packet)
 {
-	header->checksum = 0;
-	header->checksum = htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t*)header, sizeof(TCPHeader))));
+	uint8_t src_ip[4];
+	uint8_t dst_ip[4];
+	uint32_t src_ip_32;
+	uint32_t dst_ip_32;
+
+	packet->readData(14+12, src_ip, 4);
+	packet->readData(14+16, dst_ip, 4);
+	memcpy(&src_ip_32, src_ip, 4);
+	memcpy(&dst_ip_32, dst_ip, 4);
+
+	struct TCPHeader* header;
+	header = (struct TCPHeader*)(packet + 34);
+	//packet->readData(34, &header, sizeof(struct TCPHeader));
+
+	header->checksum = htons(~(NetworkUtil::tcp_sum(src_ip_32, dst_ip_32, (uint8_t*)header, packet->getSize() - 34)));
 }
 
-bool TCPAssignment::check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip)
+//bool TCPAssignment::check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip, int data)
+bool TCPAssignment::check_tcp_checksum(Packet* packet)
 {
+	uint8_t src_ip[4];
+	uint8_t dest_ip[4];
+	uint32_t src_ip_32;
+	uint32_t dest_ip_32;
+
+	packet->readData(14+12, src_ip, 4);
+	packet->readData(14+16, dest_ip, 4);
+	memcpy(&src_ip_32, src_ip, 4);
+	memcpy(&dest_ip_32, dest_ip, 4);
+	
+	Packet* newPacket = clonePacket(packet);
+
+	struct TCPHeader *header;
+	header = (struct TCPHeader*)(newPacket + 34);
+//	packet->readData(34, &header, sizeof(struct TCPHeader));
+
 	uint16_t checksum = header->checksum;
-	struct TCPHeader newHeader;
-	memcpy(&newHeader, header, sizeof(TCPHeader));
-	newHeader.checksum = 0;
+	header->checksum = 0;
 	//if(checksum == htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t *)newHeader, sizeof(TCPHeader))))) return true;
 	//return false;
-	return checksum == htons(~(NetworkUtil::tcp_sum(src_ip, dst_ip, (uint8_t *)&newHeader, sizeof(TCPHeader))));
+	return checksum == htons(~(NetworkUtil::tcp_sum(src_ip_32, dest_ip_32, (uint8_t *)header, (int)packet->getSize() - 34)));
 }
 
 }

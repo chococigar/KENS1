@@ -90,6 +90,15 @@ struct AcceptData
 	socklen_t* addrlen;
 };
 
+
+struct SegmentInfo
+{
+	int sequence;
+	int bufferOffset;
+	int length;
+};
+
+
 struct SocketData
 {
 	UUID socketUUID;
@@ -109,14 +118,16 @@ struct SocketData
 	State state;
 	int backlog;
 	int pendingConnections;
-	//std::vector<Connection> pendingConnections;
 	bool accepted;
 
+	int sequence; //host order seq number
 
 	char* write_buffer;
 	int write_buffer_pointer;
 	char* read_buffer;
 	int read_buffer_pointer;
+
+	std::vector<SegmentInfo> segmentList;
 };
 
 class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
@@ -152,8 +163,10 @@ protected:
 	virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd,
 		struct sockaddr *addr, socklen_t *addrlen);
 
-	void add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip);
-	bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
+	//void add_tcp_checksum(TCPHeader *header, uint32_t src_ip, uint32_t dst_ip);
+	void add_tcp_checksum(Packet* packet);
+	//bool check_tcp_checksum(TCPHeader* header, uint32_t src_ip, uint32_t dst_ip);
+	bool check_tcp_checksum(Packet* packet);
 	void print_socket(SocketData*);
 	void reply_ack(Packet* packet);
 	std::vector<SocketData*> socketList;
